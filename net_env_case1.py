@@ -7,8 +7,8 @@ import csv
 objective_function_over_time = []
 number_of_requests = 100
 
-min_ht = 100
-max_ht = 200
+min_ht = 10
+max_ht = 20
 
 min_slots = 0
 max_slots = 10
