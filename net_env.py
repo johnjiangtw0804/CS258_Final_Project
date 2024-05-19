@@ -129,7 +129,7 @@ class NetworkEnv(gym.Env):
 
         # 這是我們可以用來存 edge state for every t，然後用它來算 objective function
         self._round_to_EdgeStats = []
-        EdgeStats = []
+        EdgeStats = [] # EdgeStae * len(edges)
         for u, v in self._G.edges:
             # id get
             if self._G[u][v].get('id') is None:
@@ -181,7 +181,7 @@ class NetworkEnv(gym.Env):
         # rewards
         blocking_reward = -1
         non_reachability_penalty = -10 # relatively high penalty
-        success_reward = 20
+        success_reward = 100
 
         # if the action is blocking or non-reachable, we dont change the link state, so we make a copy of it
         old_linkstates = self._linkstates.copy()
@@ -248,14 +248,14 @@ class NetworkEnv(gym.Env):
         terminated = (self.round  == number_of_requests)
         return observation, reward, terminated, terminated, info
 
-
-       # Network-wide utilization
+        # Network-wide utilization
         # https://github.com/sjsu-interconnect/cs258/blob/main/projects/rsa.md
         # 1. The utilization at time t for link e (ute) = occupied slots at time t / total slots of link e
         # 2. The average utilization of link e over T episodes = (Σ ute over T) / T.
         # 3. The formal objective function is to achieve maximum network-wide utilization. We define the network-wide utilization
         #    as the average of the edge total utility:
         #    Σ (Σ ute over T / T) over all edges e in the network
+        # case 1 <==
 
 
 
