@@ -83,7 +83,7 @@ class NetworkEnv(gym.Env):
                     continue
                 # the default algorithm is dijkstra's algorithm
                 shortest_path = nx.shortest_path(self._G, source=self._nodeID_to_name[src], target=self._nodeID_to_name[dest])
-                allowed_additional_hops_path_len = len(shortest_path) + 2 # TODO: Might need to change it to a different number
+                allowed_additional_hops_path_len = len(shortest_path) + 1 # TODO: Might need to change it to a different number
 
                 # define dfs function to calculate the possible paths between two nodes
                 def dfs(graph, current, end, path):
