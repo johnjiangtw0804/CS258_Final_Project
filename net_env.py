@@ -61,7 +61,6 @@ class EdgeStat:
         return occupied_counter / len(self.__slots)
 
 class NetworkEnv(gym.Env):
-    # private variables
     def __init__(self) -> None:
         self._G = nx.read_gml("data/nsfnet.gml")
         adj = nx.adjacency_matrix(self._G).todense()
@@ -80,13 +79,12 @@ class NetworkEnv(gym.Env):
                     self._adj_dict[j].add(i)
 
         # define 2D array to store all the possible paths between two nodes
-        # the path length is less than or equal to the shortest path length + 3
         self._possible_paths = [[[] for _ in range(len(self._G.nodes))] for _ in range(len(self._G.nodes))]
         for src in self._adj_dict:
             for dest in self._adj_dict[src]:
                 # the default algorithm is dijkstra's algorithm
                 shortest_path = nx.shortest_path(self._G, source=self._nodeID_to_name[src], target=self._nodeID_to_name[dest])
-                allowed_additional_hops_path_len = len(shortest_path) + 3 # TODO: Might need to change it to a different number
+                allowed_additional_hops_path_len = len(shortest_path) + 2 # TODO: Might need to change it to a different number
 
                 # define dfs function to calculate the possible paths between two nodes
                 def dfs(graph, current, end, path):
@@ -95,13 +93,17 @@ class NetworkEnv(gym.Env):
                     if (current == end):
                         self._possible_paths[src][dest].append(path.copy())
                         return
+                    # find all the neighbors of the current node
                     for next in graph[current]:
-                        path.append(next)
-                        dfs(graph, next, end, path)
-                        path.pop()
+                        # next not yet seen in the path
+                        if next not in path:
+                            path.append(next)
+                            dfs(graph, next, end, path)
+                            path.pop()
                 dfs(self._adj_dict, src, dest, [src])
 
-        # action(int) to path (list) converter
+        # action -> to path (list) converter
+        # actions => how many possible paths i -> path
         self._action_to_path = []
         total_paths = 0
         for i in range(len(self._G.nodes)):
@@ -115,7 +117,7 @@ class NetworkEnv(gym.Env):
             {
                 "links": spaces.Box(min_slots, max_slots, shape=(len(self._G.edges),), dtype=int),
                 "req_ht": spaces.Discrete(max_ht+1), # Discrete is exclusive
-                "req_src": spaces.Discrete(len(self._G.nodes)), # I believe src and dest are useful for the agent to learn
+                "req_src": spaces.Discrete(len(self._G.nodes)),
                 "req_dst": spaces.Discrete(len(self._G.nodes)),
             }
         )
@@ -129,6 +131,7 @@ class NetworkEnv(gym.Env):
         self._round_to_EdgeStats = []
         EdgeStats = []
         for u, v in self._G.edges:
+            # id get
             if self._G[u][v].get('id') is None:
                 id = 3
             else:
@@ -138,9 +141,10 @@ class NetworkEnv(gym.Env):
         self._round_to_EdgeStats.append(EdgeStats) # for round zero
 
     def _generate_req(self):
-        # case 1
-        src = self._nodeName_to_ID["San Diego Supercomputer Center"]
-        dest = self._nodeName_to_ID["Jon Von Neumann Center, Princeton, NJ"]
+        # case 2
+       # The source and destination nodes are selected uniform-randomly among all nodes.
+        src = np.random.randint(0, len(self._G.nodes))
+        dest = np.random.randint(0, len(self._G.nodes))
         return np.array([Request(src, dest, np.random.randint(min_ht, max_ht))])
 
     def _get_obs(self):
@@ -152,7 +156,6 @@ class NetworkEnv(gym.Env):
         }
 
     def reset(self, seed=None, options=None):
-        debug = self
         super().reset(seed=seed)
         self._linkstates = np.array([0] * self._G.number_of_edges())
 
@@ -160,12 +163,14 @@ class NetworkEnv(gym.Env):
         EdgeStats = []
         for u, v in self._G.edges:
             if self._G[u][v].get('id') is None:
+                # there is no id attribute, so we assign a missing value
                 id = 3
             else:
                 id = self._G[u][v]['id'][1:]
             estat = EdgeStat(id, u, v, max_slots)
             EdgeStats.append(estat)
         self._round_to_EdgeStats.append(EdgeStats) # for round zero
+
         self._req = self._generate_req()
         observation = self._get_obs()
         info = {}
@@ -173,11 +178,10 @@ class NetworkEnv(gym.Env):
         return observation, info
 
     def step(self, action):
-        debug = self
         # rewards
         blocking_reward = -1
-        non_reachability_penalty = -5 # I think this should be a large negative number. I am not sure
-        success_reward = 1
+        non_reachability_penalty = -10 # relatively high penalty
+        success_reward = 20
 
         # if the action is blocking or non-reachable, we dont change the link state, so we make a copy of it
         old_linkstates = self._linkstates.copy()
@@ -193,9 +197,11 @@ class NetworkEnv(gym.Env):
             # early return if the path is not reachable
             if src != self._req[0].s or dest != self._req[0].t:
                 reward = non_reachability_penalty
+            # it is reachable, so we try to route the request
             else:
                 def route(path, edgestats, linkstates, request) -> tuple[bool, list[EdgeStat], np.array]:
                     for i in range(len(path) - 1):
+                        # 0 1 2 3
                         u = path[i]
                         v = path[i+1]
                         # check if the link has available slots
@@ -234,8 +240,6 @@ class NetworkEnv(gym.Env):
             # update the link state if the capacity has changed
             if prev_cap != e.cap:
                 self._linkstates[e.id] += e.cap - prev_cap
-
-        ROUND_TO_EDGE_STATS = self._round_to_EdgeStats
 
         # next round
         self._req = self._generate_req()

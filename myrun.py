@@ -41,6 +41,6 @@ blconfig = (PPOConfig()
 
 baseline = blconfig.build()
 
-for _ in range(100):
+for _ in range(1000):
     algo.train()
     baseline.train()
