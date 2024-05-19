@@ -2,7 +2,9 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import networkx as nx
+import csv
 
+objective_function_over_time = []
 number_of_requests = 100
 
 min_ht = 10
@@ -51,14 +53,6 @@ class EdgeStat:
             if slot is None:
                 res.append(color)
         return res
-
-    # utilization of the link
-    def show_spectrum_state(self) -> float:
-        occupied_counter = 0
-        for _, slot in enumerate(self.__slots):
-            if slot is not None:
-                occupied_counter += 1
-        return occupied_counter / len(self.__slots)
 
 class NetworkEnv(gym.Env):
     def __init__(self) -> None:
@@ -246,16 +240,21 @@ class NetworkEnv(gym.Env):
         observation = self._get_obs()
         info = {}
         terminated = (self.round  == number_of_requests)
+        util_t_e = 0.0
+
+        # objective over this episode
+        if terminated:
+            for EdgeStats in self._round_to_EdgeStats:
+                for estat in EdgeStats:
+                    util_t_e += (max_slots - estat.cap) / max_slots # utilization of the link
+            util_t_e = util_t_e / (number_of_requests * len(EdgeStats))
+            # (the objective vs episode)
+            objective_function_over_time.append(util_t_e)
+            data = [util_t_e]
+
+            # Append to the CSV file
+            with open('objective_over_episode.csv', mode='a', newline='') as file:
+                writer = csv.writer(file)
+                # Write the float as a row to the CSV file
+                writer.writerow(data)
         return observation, reward, terminated, terminated, info
-
-        # Network-wide utilization
-        # https://github.com/sjsu-interconnect/cs258/blob/main/projects/rsa.md
-        # 1. The utilization at time t for link e (ute) = occupied slots at time t / total slots of link e
-        # 2. The average utilization of link e over T episodes = (Σ ute over T) / T.
-        # 3. The formal objective function is to achieve maximum network-wide utilization. We define the network-wide utilization
-        #    as the average of the edge total utility:
-        #    Σ (Σ ute over T / T) over all edges e in the network
-        # case 1 <==
-
-
-

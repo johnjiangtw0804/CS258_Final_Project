@@ -38,9 +38,7 @@ blconfig = (PPOConfig()
           .resources(num_gpus=0)
           .env_runners(num_env_runners=0, num_envs_per_env_runner=1)
         )
-
 baseline = blconfig.build()
 
-for _ in range(1000):
-    algo.train()
-    baseline.train()
+for i in range(2):
+  res = algo.train()
