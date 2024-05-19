@@ -7,11 +7,14 @@ import csv
 objective_function_over_time = []
 number_of_requests = 100
 
-min_ht = 10
-max_ht = 20
+min_ht = 100
+max_ht = 200
 
 min_slots = 0
 max_slots = 10
+
+src_id = 1
+dest_id = 7
 
 class Request:
     def __init__(self, s, t, ht):
@@ -21,7 +24,7 @@ class Request:
 
 class EdgeStat:
     def __init__(self, id, u, v, cap) -> None:
-        self.id = id
+        self.id = int(id)
         self.u = u
         self.v = v
         self.cap = cap
@@ -40,11 +43,13 @@ class EdgeStat:
         # iterate over the slots and decrement the holding time
         # this function is called at the end of each time slot, so when we decrement the holding time is 1, we remove the request
         for color, holding_time in enumerate(self.__hts):
-            if holding_time == 1:
+            if holding_time > 1:
+                self.__hts[color] -= 1
+            elif holding_time == 1:
                 self.__slots[color] = None
                 self.cap += 1
-                continue
-            self.__hts[color] -= 1
+                self.__hts[color] = 0
+
 
     def get_available_colors(self) -> list[int]:
         res = []
@@ -59,11 +64,9 @@ class NetworkEnv(gym.Env):
         self._G = nx.read_gml("data/nsfnet.gml")
         adj = nx.adjacency_matrix(self._G).todense()
 
-        # we need these attributes to convert the node name to node ID and vice versa
         self._nodeID_to_name = {i: name for i, name in enumerate(self._G.nodes)}
         self._nodeName_to_ID = {name: i for i, name in enumerate(self._G.nodes)}
 
-        # Personally, I like to use dictionary to store the adjacency list
         self._adj_dict = {i: set() for i in range(len(self._G.nodes))}
         for i in range(len(self._G.nodes)):
             for j in range(len(self._G.nodes)):
@@ -74,8 +77,10 @@ class NetworkEnv(gym.Env):
 
         # define 2D array to store all the possible paths between two nodes
         self._possible_paths = [[[] for _ in range(len(self._G.nodes))] for _ in range(len(self._G.nodes))]
-        for src in self._adj_dict:
-            for dest in self._adj_dict[src]:
+        for src in range(len(self._G.nodes)):
+            for dest in range(len(self._G.nodes)):
+                if src == dest:
+                    continue
                 # the default algorithm is dijkstra's algorithm
                 shortest_path = nx.shortest_path(self._G, source=self._nodeID_to_name[src], target=self._nodeID_to_name[dest])
                 allowed_additional_hops_path_len = len(shortest_path) + 2 # TODO: Might need to change it to a different number
@@ -96,32 +101,17 @@ class NetworkEnv(gym.Env):
                             path.pop()
                 dfs(self._adj_dict, src, dest, [src])
 
-        # action -> to path (list) converter
-        # actions => how many possible paths i -> path
-        self._action_to_path = []
-        total_paths = 0
-        for i in range(len(self._G.nodes)):
-            for j in range(len(self._G.nodes)):
-                if i != j:
-                    total_paths += len(self._possible_paths[i][j])
-                    for path in self._possible_paths[i][j]:
-                        self._action_to_path.append((path))
-
         self.observation_space = spaces.Dict(
             {
                 "links": spaces.Box(min_slots, max_slots, shape=(len(self._G.edges),), dtype=int),
-                "req_ht": spaces.Discrete(max_ht+1), # Discrete is exclusive
-                "req_src": spaces.Discrete(len(self._G.nodes)),
-                "req_dst": spaces.Discrete(len(self._G.nodes)),
+                "req_ht": spaces.Discrete(max_ht+1),
             }
         )
 
-        # assuming #(total_paths) is the blocking action
-        self.action_space = spaces.Discrete(total_paths + 1) # +1 since discrete is exclusive and we have a blocking action
-        self.blocking_action = total_paths
+        self.blocking_action = len(self._possible_paths[src_id][dest_id])
+        self.action_space = spaces.Discrete(len(self._possible_paths[src_id][dest_id]) + 1)
         self.round = 0
 
-        # 這是我們可以用來存 edge state for every t，然後用它來算 objective function
         self._round_to_EdgeStats = []
         EdgeStats = [] # EdgeStae * len(edges)
         for u, v in self._G.edges:
@@ -130,23 +120,18 @@ class NetworkEnv(gym.Env):
                 id = 3
             else:
                 id = self._G[u][v]['id'][1:]
+            u, v = self._nodeName_to_ID[u], self._nodeName_to_ID[v]
             estat = EdgeStat(id, u, v, max_slots)
             EdgeStats.append(estat)
         self._round_to_EdgeStats.append(EdgeStats) # for round zero
 
     def _generate_req(self):
-        # case 2
-       # The source and destination nodes are selected uniform-randomly among all nodes.
-        src = np.random.randint(0, len(self._G.nodes))
-        dest = np.random.randint(0, len(self._G.nodes))
-        return np.array([Request(src, dest, np.random.randint(min_ht, max_ht))])
+        return np.array([Request(src_id, dest_id, np.random.randint(min_ht, max_ht))])
 
     def _get_obs(self):
         return {
             "links": self._linkstates,
             "req_ht": self._req[0].ht,
-            "req_src": self._req[0].s,
-            "req_dst": self._req[0].t,
         }
 
     def reset(self, seed=None, options=None):
@@ -161,6 +146,7 @@ class NetworkEnv(gym.Env):
                 id = 3
             else:
                 id = self._G[u][v]['id'][1:]
+            u, v = self._nodeName_to_ID[u], self._nodeName_to_ID[v]
             estat = EdgeStat(id, u, v, max_slots)
             EdgeStats.append(estat)
         self._round_to_EdgeStats.append(EdgeStats) # for round zero
@@ -174,8 +160,7 @@ class NetworkEnv(gym.Env):
     def step(self, action):
         # rewards
         blocking_reward = -1
-        non_reachability_penalty = -10 # relatively high penalty
-        success_reward = 100
+        success_reward = 1
 
         # if the action is blocking or non-reachable, we dont change the link state, so we make a copy of it
         old_linkstates = self._linkstates.copy()
@@ -184,43 +169,36 @@ class NetworkEnv(gym.Env):
         if action == self.blocking_action:
             reward = blocking_reward
         else: # routing the request
-            path = self._action_to_path[action]
-            src = path[0]
-            dest = path[-1]
-
-            # early return if the path is not reachable
-            if src != self._req[0].s or dest != self._req[0].t:
-                reward = non_reachability_penalty
+            path = self._possible_paths[src_id][dest_id][action]
             # it is reachable, so we try to route the request
-            else:
-                def route(path, edgestats, linkstates, request) -> tuple[bool, list[EdgeStat], np.array]:
-                    for i in range(len(path) - 1):
-                        # 0 1 2 3
-                        u = path[i]
-                        v = path[i+1]
-                        # check if the link has available slots
-                        for e in edgestats:
-                            if e.u == u and e.v == v:
-                                available_colors = e.get_available_colors()
-                                # blocking
-                                if len(available_colors) == 0:
-                                    return False, edgestats, linkstates
-                                # update the edge state
-                                e.add_request(request, e.get_available_colors()[0])
-                                # update the link state
-                                linkstates[e.id] += 1
-                                break
-                    return True, edgestats, linkstates
+            def route(path, edgestats, linkstates, request) -> tuple[bool, list[EdgeStat], np.array]:
+                for i in range(len(path) - 1):
+                    # 0 1 2 3
+                    u = path[i]
+                    v = path[i+1]
+                    # check if the link has available slots
+                    for e in edgestats:
+                        if e.u == u and e.v == v:
+                            available_colors = e.get_available_colors()
+                            # blocking
+                            if len(available_colors) == 0:
+                                return False, edgestats, linkstates
+                            # update the edge state
+                            e.add_request(request, e.get_available_colors()[0])
+                            # update the link state
+                            linkstates[e.id] += 1
+                            break
+                return True, edgestats, linkstates
 
-                isOK, new_edgeStats, new_linkStates = route(path, old_edgeStats, old_linkstates, self._req[0])
-                if  isOK:
-                    reward = success_reward
-                # this could happen if the path is blocked
-                else:
-                    reward = blocking_reward
+            isOK, new_edgeStats, new_linkStates = route(path, old_edgeStats, old_linkstates, self._req[0])
+            if  isOK:
+                reward = success_reward
+            # this could happen if the path is blocked
+            else:
+                reward = blocking_reward
 
         self.round += 1
-        if reward == non_reachability_penalty or reward == blocking_reward:
+        if reward == blocking_reward:
             self._round_to_EdgeStats.append(old_edgeStats)
             self._linkstates = old_linkstates
         else:
@@ -233,7 +211,7 @@ class NetworkEnv(gym.Env):
             e.remove_requests()
             # update the link state if the capacity has changed
             if prev_cap != e.cap:
-                self._linkstates[e.id] += e.cap - prev_cap
+                self._linkstates[e.id] -= e.cap - prev_cap
 
         # next round
         self._req = self._generate_req()
