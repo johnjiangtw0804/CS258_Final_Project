@@ -6,7 +6,7 @@ x_points = []
 y_points = []
 
 # Open the CSV file in read mode
-with open('objective_over_episode.csv', mode='r', newline='') as file:
+with open('CHANGE THE FILE NAME.csv', mode='r', newline='') as file:
     reader = csv.reader(file)
     # Iterate over each row in the CSV file
     i = 1
