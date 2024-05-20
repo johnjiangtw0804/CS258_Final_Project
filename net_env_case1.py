@@ -178,7 +178,7 @@ class NetworkEnv(gym.Env):
                     v = path[i+1]
                     # check if the link has available slots
                     for e in edgestats:
-                        if e.u == u and e.v == v:
+                        if (e.u == u and e.v == v) or (e.u == v and e.v == u):
                             available_colors = e.get_available_colors()
                             # blocking
                             if len(available_colors) == 0:
@@ -217,7 +217,7 @@ class NetworkEnv(gym.Env):
         self._req = self._generate_req()
         observation = self._get_obs()
         info = {}
-        terminated = (self.round  == number_of_requests)
+        terminated = (self.round  == number_of_requests - 1)
         util_t_e = 0.0
 
         # objective over this episode
